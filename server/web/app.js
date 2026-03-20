@@ -14,6 +14,7 @@ let lastStateFetchAt = 0;
 let expanded = JSON.parse(localStorage.getItem("sensorExpanded") || "{}");
 let customNames = JSON.parse(localStorage.getItem("sensorNames") || "{}");
 let sensorOrder = JSON.parse(localStorage.getItem("sensorOrder") || "[]");
+let customDeviceName = localStorage.getItem("customDeviceName") || "";
 
 const connectionBadge = document.getElementById("connectionBadge");
 const hero = document.getElementById("hero");
@@ -48,6 +49,7 @@ socket.io.on("reconnect", () => {
 socket.on("initial_state", (data) => {
     if (data) {
         state = data;
+        normalizeSensorOrder();
         render();
     }
 });
@@ -55,6 +57,7 @@ socket.on("initial_state", (data) => {
 socket.on("update", (data) => {
     if (data) {
         state = data;
+        normalizeSensorOrder();
         render();
     }
 });
@@ -71,6 +74,7 @@ async function fetchState() {
 
         if (data && data.data !== undefined) {
             state = data;
+            normalizeSensorOrder();
             render();
         }
     } catch (_) { }
@@ -84,6 +88,53 @@ function setConnectionStatus(mode, text) {
     connectionBadge.textContent = text;
 }
 
+function getData() {
+    return state.data || {};
+}
+
+function getDhtList() {
+    const dht = getData().dht;
+    return Array.isArray(dht) ? dht : [];
+}
+
+function getSensorKey(sensor) {
+    return `${sensor.name || "sensor"}__${sensor.gpio ?? "na"}`;
+}
+
+function isSensorActive(sensor) {
+    return sensor.enabled && (
+        sensor.status === "ok" ||
+        sensor.status === "simulated" ||
+        sensor.status === "unstable"
+    );
+}
+
+function getDisplayDeviceName() {
+    return customDeviceName || state.device_id || "-";
+}
+
+function getDisplaySensorName(sensor) {
+    return customNames[getSensorKey(sensor)] || sensor.name || "DHT";
+}
+
+function normalizeSensorOrder() {
+    const currentKeys = getDhtList().map(getSensorKey);
+    const existingValid = sensorOrder.filter((key) => currentKeys.includes(key));
+    const missing = currentKeys.filter((key) => !existingValid.includes(key));
+    sensorOrder = [...existingValid, ...missing];
+    localStorage.setItem("sensorOrder", JSON.stringify(sensorOrder));
+}
+
+function sortSensorsBySavedOrder(sensors) {
+    return [...sensors].sort((a, b) => {
+        const aKey = getSensorKey(a);
+        const bKey = getSensorKey(b);
+        const ai = sensorOrder.indexOf(aKey);
+        const bi = sensorOrder.indexOf(bKey);
+        return ai - bi;
+    });
+}
+
 function render() {
     const summary = document.getElementById("summary");
     const content = document.getElementById("content");
@@ -93,10 +144,10 @@ function render() {
     summary.innerHTML = "";
     content.innerHTML = "";
 
-    const data = state.data || {};
-    const dhtList = Array.isArray(data.dht) ? data.dht : [];
+    const data = getData();
+    const dhtList = getDhtList();
 
-    renderHero(data, dhtList);
+    renderHero(dhtList);
     renderSummary(summary, dhtList, data);
 
     if (currentView === "dashboard") {
@@ -112,7 +163,7 @@ function render() {
     }
 }
 
-function renderHero(data, dhtList) {
+function renderHero(dhtList) {
     if (!hero) return;
 
     const healthy = dhtList.filter((s) => isSensorActive(s)).length;
@@ -121,7 +172,7 @@ function renderHero(data, dhtList) {
     hero.innerHTML = `
         <div class="hero-title">מערכת ניטור חיישנים</div>
         <div class="hero-subtitle">
-            תחנה: <b>${escapeHtml(state.device_id || "-")}</b> ·
+            תחנה: <b>${escapeHtml(getDisplayDeviceName())}</b> ·
             עדכון אחרון: <b>${escapeHtml(formatDateTime(state.lastUpdate))}</b> ·
             חיישני DHT פעילים: <b>${enabled}</b> ·
             חיישנים תקינים: <b>${healthy}</b>
@@ -133,7 +184,8 @@ function renderSummary(container, dhtList, data) {
     const activeDHT = dhtList.filter((s) => s.enabled);
     const okDHT = dhtList.filter((s) => isSensorActive(s));
 
-    addSummaryCard(container, "Device ID", state.device_id || "-", "תחנת השידור המחוברת");
+    addSummaryCard(container, "Device Name", getDisplayDeviceName(), "שם המכשיר להצגה");
+    addSummaryCard(container, "Device ID", state.device_id || "-", "מזהה התחנה");
     addSummaryCard(container, "Last Update", formatDateTime(state.lastUpdate), "זמן עדכון אחרון");
     addSummaryCard(container, "DHT Enabled", activeDHT.length, "חיישני DHT פעילים");
     addSummaryCard(container, "DHT Healthy", okDHT.length, "חיישנים עם קריאה תקינה");
@@ -153,16 +205,42 @@ function renderSummary(container, dhtList, data) {
 }
 
 function renderDashboard(container, dhtList, data) {
-    if (!state.device_id) {
+    if (!state.device_id && !dhtList.length) {
         addEmpty(container, "ממתין לנתונים מהשרת...");
         return;
     }
 
     addSectionTitle(container, "סקירה כללית");
 
-    if (dhtList.length) {
-        const ordered = sortSensorsBySavedOrder(dhtList);
+    const deviceEditor = document.createElement("div");
+    deviceEditor.className = "card full-width";
+    deviceEditor.innerHTML = `
+        <div class="card-title">שם המכשיר</div>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <input
+                id="deviceNameInput"
+                type="text"
+                value="${escapeHtml(getDisplayDeviceName())}"
+                style="flex:1; min-width:220px; background:rgba(11,18,32,0.8); border:1px solid #334155; color:white; border-radius:10px; padding:10px 12px;"
+            />
+            <button
+                id="saveDeviceNameBtn"
+                style="background:#2563eb; color:white; border:none; border-radius:10px; padding:10px 14px; cursor:pointer;"
+            >
+                שמור
+            </button>
+            <button
+                id="resetDeviceNameBtn"
+                style="background:#334155; color:white; border:none; border-radius:10px; padding:10px 14px; cursor:pointer;"
+            >
+                אפס
+            </button>
+        </div>
+    `;
+    container.appendChild(deviceEditor);
 
+    const ordered = sortSensorsBySavedOrder(dhtList);
+    if (ordered.length) {
         const grid = document.createElement("div");
         grid.className = "dashboard-sensor-grid full-width";
         grid.id = "dashboardSensorGrid";
@@ -171,8 +249,8 @@ function renderDashboard(container, dhtList, data) {
             grid.appendChild(createDashboardSensorCard(sensor));
         });
 
-        enableDashboardDragAndDrop(grid);
         container.appendChild(grid);
+        enableDashboardDragAndDrop(grid);
     } else {
         addEmpty(container, "אין כרגע חיישני DHT להצגה");
     }
@@ -194,8 +272,27 @@ function renderDashboard(container, dhtList, data) {
             </div>
         </div>
     `;
-
     addCard(container, "Environment", envHtml, true);
+
+    const saveBtn = document.getElementById("saveDeviceNameBtn");
+    const resetBtn = document.getElementById("resetDeviceNameBtn");
+    const input = document.getElementById("deviceNameInput");
+
+    if (saveBtn && input) {
+        saveBtn.addEventListener("click", () => {
+            customDeviceName = input.value.trim();
+            localStorage.setItem("customDeviceName", customDeviceName);
+            render();
+        });
+    }
+
+    if (resetBtn) {
+        resetBtn.addEventListener("click", () => {
+            customDeviceName = "";
+            localStorage.removeItem("customDeviceName");
+            render();
+        });
+    }
 }
 
 function renderDHT(container, dhtList) {
@@ -268,7 +365,7 @@ function renderEnv(container, data) {
 function createDashboardSensorCard(sensor) {
     const sensorKey = getSensorKey(sensor);
     const isExpanded = expanded[sensorKey] ?? false;
-    const displayName = customNames[sensorKey] || sensor.name || sensorKey;
+    const displayName = getDisplaySensorName(sensor);
     const badge = getStatusBadge(sensor.status);
     const active = isSensorActive(sensor);
 
@@ -343,7 +440,7 @@ function addClassicDHTCard(container, sensor) {
     const html = `
         <div class="sensor-card">
             <div class="sensor-header">
-                <div class="sensor-name">${escapeHtml(customNames[getSensorKey(sensor)] || sensor.name || "DHT")}</div>
+                <div class="sensor-name">${escapeHtml(getDisplaySensorName(sensor))}</div>
                 <div class="badge ${badge.className}">${badge.label}</div>
             </div>
 
@@ -370,7 +467,7 @@ function addClassicDHTCard(container, sensor) {
         </div>
     `;
 
-    addCard(container, customNames[getSensorKey(sensor)] || sensor.name || "DHT", html);
+    addCard(container, getDisplaySensorName(sensor), html);
 }
 
 function enableDashboardDragAndDrop(grid) {
@@ -386,6 +483,7 @@ function enableDashboardDragAndDrop(grid) {
             card.classList.remove("dragging");
             dragged = null;
             saveDashboardOrder(grid);
+            render();
         });
 
         card.addEventListener("dragover", (e) => {
@@ -420,40 +518,6 @@ function saveDashboardOrder(grid) {
     const items = [...grid.querySelectorAll(".dashboard-sensor-card")];
     sensorOrder = items.map((item) => item.dataset.sensorKey);
     localStorage.setItem("sensorOrder", JSON.stringify(sensorOrder));
-}
-
-function sortSensorsBySavedOrder(sensors) {
-    const ordered = [...sensors].sort((a, b) => {
-        const aKey = getSensorKey(a);
-        const bKey = getSensorKey(b);
-        const ai = sensorOrder.indexOf(aKey);
-        const bi = sensorOrder.indexOf(bKey);
-
-        if (ai === -1 && bi === -1) return 0;
-        if (ai === -1) return 1;
-        if (bi === -1) return -1;
-        return ai - bi;
-    });
-
-    const missingKeys = ordered.map(getSensorKey).filter((key) => !sensorOrder.includes(key));
-    if (missingKeys.length) {
-        sensorOrder = [...sensorOrder, ...missingKeys];
-        localStorage.setItem("sensorOrder", JSON.stringify(sensorOrder));
-    }
-
-    return ordered;
-}
-
-function getSensorKey(sensor) {
-    return `${sensor.name || "sensor"}__${sensor.gpio ?? "na"}`;
-}
-
-function isSensorActive(sensor) {
-    return sensor.enabled && (
-        sensor.status === "ok" ||
-        sensor.status === "simulated" ||
-        sensor.status === "unstable"
-    );
 }
 
 function addSummaryCard(container, title, value, subtext = "") {
