@@ -1,0 +1,33 @@
+{
+    "server_url": "https://sensor-monitor-kqb9.onrender.com/api/ingest",
+    "device_id": "raspi-001",
+    "send_interval_seconds": 5,
+    "simulation_mode": true,
+    "dht_sensors": [
+        {
+            "name": "DHT 1",
+            "enabled": true,
+            "gpio": 4
+        },
+        {
+            "name": "DHT 2",
+            "enabled": true,
+            "gpio": 17
+        },
+        {
+            "name": "DHT 3",
+            "enabled": true,
+            "gpio": 27
+        },
+        {
+            "name": "DHT 4",
+            "enabled": false,
+            "gpio": 22
+        },
+        {
+            "name": "DHT 5",
+            "enabled": false,
+            "gpio": 5
+        }
+    ]
+}

@@ -1,40 +1,75 @@
+import json
 import time
+from pathlib import Path
+
 import requests
-import random
 
-SERVER_URL = "https://YOUR-RENDER-URL.onrender.com/api/ingest"
-DEVICE_ID = "raspi-001"
+from dht_reader import DHTReader
 
-def generate_data():
-    return {
-        "device_id": DEVICE_ID,
-        "dht": [
-            {"temp": round(20 + random.random()*5, 1), "humidity": random.randint(40,70)},
-            {"temp": round(21 + random.random()*5, 1), "humidity": random.randint(40,70)}
-        ],
-        "mpu": {
-            "x": round(random.random(),2),
-            "y": round(random.random(),2),
-            "z": round(random.random(),2)
-        },
-        "hmc": {
-            "heading": random.randint(0,360)
-        },
+
+BASE_DIR = Path(__file__).resolve().parent
+CONFIG_PATH = BASE_DIR / "config.json"
+
+
+def load_config():
+    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def build_payload(config):
+    dht_reader = DHTReader(simulation_mode=config.get("simulation_mode", True))
+    dht_results = []
+
+    for sensor in config.get("dht_sensors", []):
+        result = dht_reader.read_sensor(
+            name=sensor.get("name", "DHT"),
+            gpio=sensor.get("gpio", 4),
+            enabled=sensor.get("enabled", False)
+        )
+        dht_results.append(result)
+
+    payload = {
+        "device_id": config.get("device_id", "raspi-001"),
+        "timestamp": int(time.time()),
+        "dht": dht_results,
+        "mpu": None,
+        "hmc": None,
         "weather": {
-            "wind_speed": random.randint(0,20)
+            "wind_speed": 0
         },
         "location": {
-            "lat": 32.1,
-            "lon": 34.8
+            "lat": None,
+            "lon": None
         }
     }
 
-while True:
-    try:
-        data = generate_data()
-        requests.post(SERVER_URL, json=data, timeout=5)
-        print("sent")
-    except Exception as e:
-        print("error:", e)
+    return payload
 
-    time.sleep(3)
+
+def send_payload(server_url, payload):
+    response = requests.post(server_url, json=payload, timeout=10)
+    response.raise_for_status()
+
+
+def main():
+    print("Sensor agent started")
+    while True:
+        try:
+            config = load_config()
+            payload = build_payload(config)
+            send_payload(config["server_url"], payload)
+            print("sent:", payload["device_id"],
+                  "| dht count:", len(payload["dht"]))
+        except Exception as exc:
+            print("error:", exc)
+
+        try:
+            interval = load_config().get("send_interval_seconds", 5)
+        except Exception:
+            interval = 5
+
+        time.sleep(interval)
+
+
+if __name__ == "__main__":
+    main()

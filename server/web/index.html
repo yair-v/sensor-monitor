@@ -1,24 +1,33 @@
 <!DOCTYPE html>
-<html lang="he">
+<html lang="he" dir="rtl">
 <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Sensor Monitor</title>
     <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+    <header class="topbar">
+        <div class="brand">
+            <div class="brand-title">Sensor Monitor</div>
+            <div class="brand-subtitle">Raspberry Pi Live Dashboard</div>
+        </div>
 
-<div class="topbar">
-    <button onclick="setView('dashboard')">Dashboard</button>
-    <button onclick="setView('dht')">Temp/Humidity</button>
-    <button onclick="setView('motion')">Motion</button>
-    <button onclick="setView('compass')">Compass</button>
-    <button onclick="setView('env')">Wind & Location</button>
-</div>
+        <nav class="nav">
+            <button class="nav-btn active" onclick="setView('dashboard', this)">Dashboard</button>
+            <button class="nav-btn" onclick="setView('dht', this)">DHT</button>
+            <button class="nav-btn" onclick="setView('motion', this)">Motion</button>
+            <button class="nav-btn" onclick="setView('compass', this)">Compass</button>
+            <button class="nav-btn" onclick="setView('env', this)">Wind & Location</button>
+        </nav>
+    </header>
 
-<div id="content" class="grid"></div>
+    <main class="page">
+        <section id="summary" class="summary-grid"></section>
+        <section id="content" class="content-grid"></section>
+    </main>
 
-<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-<script src="app.js"></script>
-
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="app.js"></script>
 </body>
 </html>
