@@ -207,3 +207,14 @@ pre.pretty-json {
         font-size: 20px;
     }
 }
+
+.sensor-card {
+    padding: 10px;
+    border-radius: 12px;
+    cursor: grab;
+    transition: 0.2s;
+}
+
+.sensor-card.dragging {
+    opacity: 0.5;
+}
