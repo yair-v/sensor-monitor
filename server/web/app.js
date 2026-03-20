@@ -16,22 +16,15 @@ let customNames = JSON.parse(localStorage.getItem("sensorNames") || "{}");
 let sensorOrder = JSON.parse(localStorage.getItem("sensorOrder") || "[]");
 let customDeviceName = localStorage.getItem("customDeviceName") || "";
 
+let draftDeviceName = customDeviceName || "";
+let isEditingDeviceName = false;
+
 const connectionBadge = document.getElementById("connectionBadge");
 const hero = document.getElementById("hero");
 const summary = document.getElementById("summary");
 const content = document.getElementById("content");
 
-let dashboardStaticBuilt = false;
-
-document.querySelectorAll(".nav-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-        document.querySelectorAll(".nav-btn").forEach((b) => b.classList.remove("active"));
-        btn.classList.add("active");
-        currentView = btn.dataset.view;
-        dashboardStaticBuilt = false;
-        render();
-    });
-});
+bindNav();
 
 socket.on("connect", () => {
     setConnectionStatus("online", "מחובר חי");
@@ -52,19 +45,17 @@ socket.io.on("reconnect", () => {
 });
 
 socket.on("initial_state", (data) => {
-    if (data) {
-        state = data;
-        normalizeSensorOrder();
-        render();
-    }
+    if (!data) return;
+    state = data;
+    normalizeSensorOrder();
+    renderAll();
 });
 
 socket.on("update", (data) => {
-    if (data) {
-        state = data;
-        normalizeSensorOrder();
-        renderLiveOnly();
-    }
+    if (!data) return;
+    state = data;
+    normalizeSensorOrder();
+    renderLiveUpdate();
 });
 
 async function fetchState() {
@@ -76,16 +67,26 @@ async function fetchState() {
         const res = await fetch("/api/status", { cache: "no-store" });
         if (!res.ok) return;
         const data = await res.json();
-
         if (data && data.data !== undefined) {
             state = data;
             normalizeSensorOrder();
-            renderLiveOnly();
+            renderLiveUpdate();
         }
     } catch (_) { }
 }
 
 setInterval(fetchState, 5000);
+
+function bindNav() {
+    document.querySelectorAll(".nav-btn").forEach((btn) => {
+        btn.onclick = () => {
+            document.querySelectorAll(".nav-btn").forEach((b) => b.classList.remove("active"));
+            btn.classList.add("active");
+            currentView = btn.dataset.view;
+            renderAll();
+        };
+    });
+}
 
 function setConnectionStatus(mode, text) {
     if (!connectionBadge) return;
@@ -124,9 +125,9 @@ function getDisplaySensorName(sensor) {
 
 function normalizeSensorOrder() {
     const currentKeys = getDhtList().map(getSensorKey);
-    const existingValid = sensorOrder.filter((key) => currentKeys.includes(key));
-    const missing = currentKeys.filter((key) => !existingValid.includes(key));
-    sensorOrder = [...existingValid, ...missing];
+    const valid = sensorOrder.filter((k) => currentKeys.includes(k));
+    const missing = currentKeys.filter((k) => !valid.includes(k));
+    sensorOrder = [...valid, ...missing];
     localStorage.setItem("sensorOrder", JSON.stringify(sensorOrder));
 }
 
@@ -138,14 +139,12 @@ function sortSensorsBySavedOrder(sensors) {
     });
 }
 
-function render() {
-    if (!summary || !content) return;
-
+function renderLiveUpdate() {
     renderHero();
     renderSummary();
 
     if (currentView === "dashboard") {
-        renderDashboard();
+        renderDashboard(true);
     } else if (currentView === "dht") {
         renderDHT();
     } else if (currentView === "motion") {
@@ -157,15 +156,20 @@ function render() {
     }
 }
 
-function renderLiveOnly() {
+function renderAll() {
     renderHero();
     renderSummary();
 
     if (currentView === "dashboard") {
-        updateDashboardSensorCards();
-        updateDashboardEnvironmentCard();
-    } else {
-        render();
+        renderDashboard(false);
+    } else if (currentView === "dht") {
+        renderDHT();
+    } else if (currentView === "motion") {
+        renderMotion();
+    } else if (currentView === "compass") {
+        renderCompass();
+    } else if (currentView === "env") {
+        renderEnv();
     }
 }
 
@@ -188,18 +192,18 @@ function renderHero() {
 }
 
 function renderSummary() {
+    if (!summary) return;
+
     summary.innerHTML = "";
 
     const data = getData();
     const dhtList = getDhtList();
-    const activeDHT = dhtList.filter((s) => s.enabled);
-    const okDHT = dhtList.filter((s) => isSensorActive(s));
 
     addSummaryCard(summary, "Device Name", getDisplayDeviceName(), "שם המכשיר להצגה");
     addSummaryCard(summary, "Device ID", state.device_id || "-", "מזהה התחנה");
     addSummaryCard(summary, "Last Update", formatDateTime(state.lastUpdate), "זמן עדכון אחרון");
-    addSummaryCard(summary, "DHT Enabled", activeDHT.length, "חיישני DHT פעילים");
-    addSummaryCard(summary, "DHT Healthy", okDHT.length, "חיישנים עם קריאה תקינה");
+    addSummaryCard(summary, "DHT Enabled", dhtList.filter((s) => s.enabled).length, "חיישנים פעילים");
+    addSummaryCard(summary, "DHT Healthy", dhtList.filter((s) => isSensorActive(s)).length, "חיישנים תקינים");
 
     if (data.weather) {
         addSummaryCard(summary, "Wind", `${safeVal(data.weather.wind_speed, 0)} km/h`, "רוח");
@@ -215,130 +219,130 @@ function renderSummary() {
     }
 }
 
-function renderDashboard() {
-    const dhtList = getDhtList();
+function renderDashboard(liveOnly) {
+    if (!content) return;
 
-    if (!dashboardStaticBuilt) {
+    if (!liveOnly) {
         content.innerHTML = "";
 
-        const titleCard = document.createElement("div");
-        titleCard.className = "card full-width";
-        titleCard.innerHTML = `<div class="section-title">סקירה כללית</div>`;
-        content.appendChild(titleCard);
+        addSectionTitle(content, "סקירה כללית");
 
-        const deviceEditor = document.createElement("div");
-        deviceEditor.className = "card full-width";
-        deviceEditor.innerHTML = `
+        const editor = document.createElement("div");
+        editor.className = "card full-width";
+        editor.innerHTML = `
             <div class="card-title">שם המכשיר</div>
             <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
                 <input
                     id="deviceNameInput"
                     type="text"
-                    value="${escapeHtml(getDisplayDeviceName())}"
+                    value="${escapeHtml(draftDeviceName || getDisplayDeviceName())}"
                     style="flex:1; min-width:220px; background:rgba(11,18,32,0.8); border:1px solid #334155; color:white; border-radius:10px; padding:10px 12px;"
                 />
-                <button
-                    id="saveDeviceNameBtn"
-                    style="background:#2563eb; color:white; border:none; border-radius:10px; padding:10px 14px; cursor:pointer;"
-                >
-                    שמור
-                </button>
-                <button
-                    id="resetDeviceNameBtn"
-                    style="background:#334155; color:white; border:none; border-radius:10px; padding:10px 14px; cursor:pointer;"
-                >
-                    אפס
-                </button>
+                <button id="saveDeviceNameBtn" style="background:#2563eb; color:white; border:none; border-radius:10px; padding:10px 14px; cursor:pointer;">שמור</button>
+                <button id="resetDeviceNameBtn" style="background:#334155; color:white; border:none; border-radius:10px; padding:10px 14px; cursor:pointer;">אפס</button>
             </div>
         `;
-        content.appendChild(deviceEditor);
+        content.appendChild(editor);
 
         const grid = document.createElement("div");
         grid.className = "dashboard-sensor-grid full-width";
         grid.id = "dashboardSensorGrid";
         content.appendChild(grid);
 
-        const envCard = document.createElement("div");
-        envCard.className = "card full-width";
-        envCard.id = "dashboardEnvCard";
-        content.appendChild(envCard);
+        const env = document.createElement("div");
+        env.className = "card full-width";
+        env.id = "dashboardEnvCard";
+        content.appendChild(env);
 
-        bindDashboardControls();
-        dashboardStaticBuilt = true;
+        bindDeviceNameEditor();
     }
 
-    if (!dhtList.length) {
-        const grid = document.getElementById("dashboardSensorGrid");
-        if (grid) {
-            grid.innerHTML = `<div class="empty-state full-width">אין כרגע חיישני DHT להצגה</div>`;
-        }
-    } else {
-        updateDashboardSensorCards();
-    }
-
-    updateDashboardEnvironmentCard();
+    renderDashboardSensors();
+    renderDashboardEnvironment();
 }
 
-function bindDashboardControls() {
+function bindDeviceNameEditor() {
+    const input = document.getElementById("deviceNameInput");
     const saveBtn = document.getElementById("saveDeviceNameBtn");
     const resetBtn = document.getElementById("resetDeviceNameBtn");
-    const input = document.getElementById("deviceNameInput");
 
-    if (saveBtn && input) {
-        saveBtn.addEventListener("click", () => {
-            customDeviceName = input.value.trim();
+    if (!input) return;
+
+    input.onfocus = () => {
+        isEditingDeviceName = true;
+    };
+
+    input.onblur = () => {
+        isEditingDeviceName = false;
+        draftDeviceName = input.value;
+    };
+
+    input.oninput = () => {
+        draftDeviceName = input.value;
+    };
+
+    if (saveBtn) {
+        saveBtn.onclick = () => {
+            customDeviceName = (draftDeviceName || "").trim();
             localStorage.setItem("customDeviceName", customDeviceName);
             renderHero();
             renderSummary();
-        });
+        };
     }
 
-    if (resetBtn && input) {
-        resetBtn.addEventListener("click", () => {
+    if (resetBtn) {
+        resetBtn.onclick = () => {
             customDeviceName = "";
+            draftDeviceName = "";
             localStorage.removeItem("customDeviceName");
             input.value = state.device_id || "";
             renderHero();
             renderSummary();
-        });
+        };
     }
 }
 
-function updateDashboardSensorCards() {
+function renderDashboardSensors() {
     const grid = document.getElementById("dashboardSensorGrid");
     if (!grid) return;
 
-    const dhtList = sortSensorsBySavedOrder(getDhtList());
-    const existingCards = new Map(
+    const sensors = sortSensorsBySavedOrder(getDhtList());
+
+    if (!sensors.length) {
+        grid.innerHTML = `<div class="empty-state full-width">אין כרגע חיישני DHT להצגה</div>`;
+        return;
+    }
+
+    const existing = new Map(
         [...grid.querySelectorAll(".dashboard-sensor-card")].map((el) => [el.dataset.sensorKey, el])
     );
 
-    const newOrderElements = [];
+    const orderedEls = [];
 
-    dhtList.forEach((sensor) => {
-        const sensorKey = getSensorKey(sensor);
-        let card = existingCards.get(sensorKey);
+    sensors.forEach((sensor) => {
+        const key = getSensorKey(sensor);
+        let card = existing.get(key);
 
         if (!card) {
             card = createDashboardSensorCard(sensor);
         }
 
         updateDashboardSensorCard(card, sensor);
-        newOrderElements.push(card);
+        orderedEls.push(card);
     });
 
     grid.innerHTML = "";
-    newOrderElements.forEach((el) => grid.appendChild(el));
-
+    orderedEls.forEach((el) => grid.appendChild(el));
     enableDashboardDragAndDrop(grid);
 }
 
 function createDashboardSensorCard(sensor) {
-    const sensorKey = getSensorKey(sensor);
+    const key = getSensorKey(sensor);
+
     const card = document.createElement("div");
     card.className = "dashboard-sensor-card";
     card.draggable = true;
-    card.dataset.sensorKey = sensorKey;
+    card.dataset.sensorKey = key;
 
     card.innerHTML = `
         <div class="dashboard-sensor-topline">
@@ -375,51 +379,56 @@ function createDashboardSensorCard(sensor) {
     `;
 
     const toggle = card.querySelector(".sensor-expand-checkbox");
-    toggle.addEventListener("change", () => {
-        expanded[sensorKey] = toggle.checked;
+    toggle.onchange = () => {
+        expanded[key] = toggle.checked;
         localStorage.setItem("sensorExpanded", JSON.stringify(expanded));
         const body = card.querySelector(".dashboard-sensor-body");
         body.classList.toggle("collapsed", !toggle.checked);
-    });
+    };
 
     const nameInput = card.querySelector(".sensor-name-input");
-    nameInput.addEventListener("change", () => {
-        customNames[sensorKey] = nameInput.value.trim() || sensor.name || sensorKey;
+    nameInput.oninput = () => {
+        customNames[key] = nameInput.value;
+        localStorage.setItem("sensorNames", JSON.stringify(customNames));
+    };
+
+    nameInput.onchange = () => {
+        customNames[key] = nameInput.value.trim() || sensor.name || key;
         localStorage.setItem("sensorNames", JSON.stringify(customNames));
         renderHero();
         renderSummary();
-    });
+    };
 
     return card;
 }
 
 function updateDashboardSensorCard(card, sensor) {
-    const sensorKey = getSensorKey(sensor);
-    const isExpanded = expanded[sensorKey] ?? false;
+    const key = getSensorKey(sensor);
+    const isExpanded = expanded[key] ?? false;
     const displayName = getDisplaySensorName(sensor);
     const badge = getStatusBadge(sensor.status);
     const active = isSensorActive(sensor);
 
-    card.className = `dashboard-sensor-card ${active ? "sensor-active" : "sensor-inactive"}`;
-    card.dataset.sensorKey = sensorKey;
+    const temp = sensor.temp == null ? "-" : `${sensor.temp}°C`;
+    const humidity = sensor.humidity == null ? "-" : `${sensor.humidity}%`;
 
-    const temp = sensor.temp === null || sensor.temp === undefined ? "-" : `${sensor.temp}°C`;
-    const humidity = sensor.humidity === null || sensor.humidity === undefined ? "-" : `${sensor.humidity}%`;
+    card.className = `dashboard-sensor-card ${active ? "sensor-active" : "sensor-inactive"}`;
+    card.dataset.sensorKey = key;
 
     const toggle = card.querySelector(".sensor-expand-checkbox");
-    const nameInput = card.querySelector(".sensor-name-input");
+    const input = card.querySelector(".sensor-name-input");
     const badgeEl = card.querySelector(".sensor-badge");
     const body = card.querySelector(".dashboard-sensor-body");
 
     toggle.checked = isExpanded;
-    if (document.activeElement !== nameInput) {
-        nameInput.value = displayName;
+    body.classList.toggle("collapsed", !isExpanded);
+
+    if (document.activeElement !== input) {
+        input.value = displayName;
     }
 
     badgeEl.textContent = badge.label;
     badgeEl.className = `mini-badge sensor-badge ${badge.className}`;
-
-    body.classList.toggle("collapsed", !isExpanded);
 
     card.querySelector(".sensor-temp").textContent = temp;
     card.querySelector(".sensor-humidity").textContent = humidity;
@@ -428,9 +437,9 @@ function updateDashboardSensorCard(card, sensor) {
     card.querySelector(".sensor-statusline").textContent = `Status: ${sensor.status || "-"}`;
 }
 
-function updateDashboardEnvironmentCard() {
-    const envCard = document.getElementById("dashboardEnvCard");
-    if (!envCard) return;
+function renderDashboardEnvironment() {
+    const env = document.getElementById("dashboardEnvCard");
+    if (!env) return;
 
     const data = getData();
     const windValue = data.weather ? `${safeVal(data.weather.wind_speed, 0)} km/h` : "-";
@@ -438,7 +447,7 @@ function updateDashboardEnvironmentCard() {
         ? `${safeVal(data.location.lat, "-")}, ${safeVal(data.location.lon, "-")}`
         : "-";
 
-    envCard.innerHTML = `
+    env.innerHTML = `
         <div class="card-title">Environment</div>
         <div class="sensor-grid">
             <div class="metric">
@@ -455,16 +464,16 @@ function updateDashboardEnvironmentCard() {
 
 function renderDHT() {
     content.innerHTML = "";
-    const dhtList = getDhtList();
+    const sensors = getDhtList();
 
     addSectionTitle(content, "חיישני DHT");
 
-    if (!dhtList.length) {
+    if (!sensors.length) {
         addEmpty(content, "לא התקבלו חיישני DHT מהסוכן");
         return;
     }
 
-    dhtList.forEach((sensor) => addClassicDHTCard(content, sensor));
+    sensors.forEach((sensor) => addClassicDHTCard(content, sensor));
 }
 
 function renderMotion() {
@@ -478,12 +487,7 @@ function renderMotion() {
         return;
     }
 
-    addCard(
-        content,
-        "MPU Data",
-        `<pre class="pretty-json">${escapeHtml(JSON.stringify(data.mpu, null, 2))}</pre>`,
-        true
-    );
+    addCard(content, "MPU Data", `<pre class="pretty-json">${escapeHtml(JSON.stringify(data.mpu, null, 2))}</pre>`, true);
 }
 
 function renderCompass() {
@@ -497,12 +501,7 @@ function renderCompass() {
         return;
     }
 
-    addCard(
-        content,
-        "Compass Data",
-        `<pre class="pretty-json">${escapeHtml(JSON.stringify(data.hmc, null, 2))}</pre>`,
-        true
-    );
+    addCard(content, "Compass Data", `<pre class="pretty-json">${escapeHtml(JSON.stringify(data.hmc, null, 2))}</pre>`, true);
 }
 
 function renderEnv() {
@@ -516,7 +515,10 @@ function renderEnv() {
         ? `${safeVal(data.location.lat, "-")}, ${safeVal(data.location.lon, "-")}`
         : "-";
 
-    const html = `
+    addCard(
+        content,
+        "Environment",
+        `
         <div class="sensor-grid">
             <div class="metric">
                 <div class="metric-label">Wind Speed</div>
@@ -527,17 +529,20 @@ function renderEnv() {
                 <div class="metric-value">${escapeHtml(locationValue)}</div>
             </div>
         </div>
-    `;
-
-    addCard(content, "Environment", html, true);
+        `,
+        true
+    );
 }
 
 function addClassicDHTCard(container, sensor) {
     const badge = getStatusBadge(sensor.status);
-    const temp = sensor.temp === null || sensor.temp === undefined ? "-" : `${sensor.temp}°C`;
-    const humidity = sensor.humidity === null || sensor.humidity === undefined ? "-" : `${sensor.humidity}%`;
+    const temp = sensor.temp == null ? "-" : `${sensor.temp}°C`;
+    const humidity = sensor.humidity == null ? "-" : `${sensor.humidity}%`;
 
-    const html = `
+    addCard(
+        container,
+        getDisplaySensorName(sensor),
+        `
         <div class="sensor-card">
             <div class="sensor-header">
                 <div class="sensor-name">${escapeHtml(getDisplaySensorName(sensor))}</div>
@@ -565,44 +570,43 @@ function addClassicDHTCard(container, sensor) {
 
             <div class="card-subtext">Status: ${escapeHtml(sensor.status || "-")}</div>
         </div>
-    `;
-
-    addCard(container, getDisplaySensorName(sensor), html);
+        `
+    );
 }
 
 function enableDashboardDragAndDrop(grid) {
     let dragged = null;
 
     grid.querySelectorAll(".dashboard-sensor-card").forEach((card) => {
-        card.addEventListener("dragstart", () => {
+        card.ondragstart = () => {
             dragged = card;
             card.classList.add("dragging");
-        });
+        };
 
-        card.addEventListener("dragend", () => {
+        card.ondragend = () => {
             card.classList.remove("dragging");
             dragged = null;
             saveDashboardOrder(grid);
-        });
+        };
 
-        card.addEventListener("dragover", (e) => {
+        card.ondragover = (e) => {
             e.preventDefault();
-            const afterElement = getDragAfterElement(grid, e.clientY);
+            const after = getDragAfterElement(grid, e.clientY);
             if (!dragged) return;
 
-            if (afterElement == null) {
+            if (after == null) {
                 grid.appendChild(dragged);
-            } else if (afterElement !== dragged) {
-                grid.insertBefore(dragged, afterElement);
+            } else if (after !== dragged) {
+                grid.insertBefore(dragged, after);
             }
-        });
+        };
     });
 }
 
 function getDragAfterElement(container, y) {
-    const draggableElements = [...container.querySelectorAll(".dashboard-sensor-card:not(.dragging)")];
+    const els = [...container.querySelectorAll(".dashboard-sensor-card:not(.dragging)")];
 
-    return draggableElements.reduce((closest, child) => {
+    return els.reduce((closest, child) => {
         const box = child.getBoundingClientRect();
         const offset = y - box.top - box.height / 2;
 
@@ -676,7 +680,7 @@ function formatDateTime(value) {
 }
 
 function safeVal(value, fallback) {
-    return value === null || value === undefined ? fallback : value;
+    return value == null ? fallback : value;
 }
 
 function escapeHtml(str) {
