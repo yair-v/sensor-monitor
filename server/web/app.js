@@ -79,6 +79,7 @@ async function fetchState() {
 setInterval(fetchState, 5000);
 
 function setConnectionStatus(mode, text) {
+    if (!connectionBadge) return;
     connectionBadge.className = `connection-badge ${mode}`;
     connectionBadge.textContent = text;
 }
@@ -86,6 +87,8 @@ function setConnectionStatus(mode, text) {
 function render() {
     const summary = document.getElementById("summary");
     const content = document.getElementById("content");
+
+    if (!summary || !content) return;
 
     summary.innerHTML = "";
     content.innerHTML = "";
@@ -110,6 +113,8 @@ function render() {
 }
 
 function renderHero(data, dhtList) {
+    if (!hero) return;
+
     const healthy = dhtList.filter((s) => isSensorActive(s)).length;
     const enabled = dhtList.filter((s) => s.enabled).length;
 
@@ -172,15 +177,20 @@ function renderDashboard(container, dhtList, data) {
         addEmpty(container, "אין כרגע חיישני DHT להצגה");
     }
 
+    const windValue = data.weather ? `${safeVal(data.weather.wind_speed, 0)} km/h` : "-";
+    const locationValue = data.location
+        ? `${safeVal(data.location.lat, "-")}, ${safeVal(data.location.lon, "-")}`
+        : "-";
+
     const envHtml = `
         <div class="sensor-grid">
             <div class="metric">
                 <div class="metric-label">Wind Speed</div>
-                <div class="metric-value">${data.weather ? `${safeVal(data.weather.wind_speed, 0)} km/h` : "-"}</div>
+                <div class="metric-value">${escapeHtml(windValue)}</div>
             </div>
             <div class="metric">
                 <div class="metric-label">Location</div>
-                <div class="metric-value">${data.location ? `${safeVal(data.location.lat, "-")}, ${safeVal(data.location.lon, "-")}` : "-"}</div>
+                <div class="metric-value">${escapeHtml(locationValue)}</div>
             </div>
         </div>
     `;
@@ -207,7 +217,12 @@ function renderMotion(container, data) {
         return;
     }
 
-    addCard(container, "MPU Data", `<pre class="pretty-json">${escapeHtml(JSON.stringify(data.mpu, null, 2))}</pre>`, true);
+    addCard(
+        container,
+        "MPU Data",
+        `<pre class="pretty-json">${escapeHtml(JSON.stringify(data.mpu, null, 2))}</pre>`,
+        true
+    );
 }
 
 function renderCompass(container, data) {
@@ -218,21 +233,31 @@ function renderCompass(container, data) {
         return;
     }
 
-    addCard(container, "Compass Data", `<pre class="pretty-json">${escapeHtml(JSON.stringify(data.hmc, null, 2))}</pre>`, true);
+    addCard(
+        container,
+        "Compass Data",
+        `<pre class="pretty-json">${escapeHtml(JSON.stringify(data.hmc, null, 2))}</pre>`,
+        true
+    );
 }
 
 function renderEnv(container, data) {
     addSectionTitle(container, "נתוני סביבה");
 
+    const windValue = data.weather ? `${safeVal(data.weather.wind_speed, 0)} km/h` : "-";
+    const locationValue = data.location
+        ? `${safeVal(data.location.lat, "-")}, ${safeVal(data.location.lon, "-")}`
+        : "-";
+
     const html = `
         <div class="sensor-grid">
             <div class="metric">
                 <div class="metric-label">Wind Speed</div>
-                <div class="metric-value">${data.weather ? `${safeVal(data.weather.wind_speed, 0)} km/h` : "-"}</div>
+                <div class="metric-value">${escapeHtml(windValue)}</div>
             </div>
             <div class="metric">
                 <div class="metric-label">Latitude / Longitude</div>
-                <div class="metric-value">${data.location ? `${safeVal(data.location.lat, "-")}, ${safeVal(data.location.lon, "-")}` : "-"}</div>
+                <div class="metric-value">${escapeHtml(locationValue)}</div>
             </div>
         </div>
     `;
@@ -258,14 +283,13 @@ function createDashboardSensorCard(sensor) {
     card.innerHTML = `
         <div class="dashboard-sensor-topline">
             <label class="sensor-expand-toggle">
-                <input type="checkbox" ${isExpanded ? "checked" : ""} data-toggle-key="${escapeHtml(sensorKey)}">
+                <input type="checkbox" ${isExpanded ? "checked" : ""}>
             </label>
 
             <input
                 class="sensor-name-input"
                 type="text"
                 value="${escapeHtml(displayName)}"
-                data-rename-key="${escapeHtml(sensorKey)}"
             >
 
             <span class="mini-badge ${badge.className}">${badge.label}</span>
@@ -275,15 +299,15 @@ function createDashboardSensorCard(sensor) {
             <div class="dashboard-mini-grid">
                 <div class="mini-metric">
                     <div class="mini-metric-label">Temp</div>
-                    <div class="mini-metric-value">${temp}</div>
+                    <div class="mini-metric-value">${escapeHtml(temp)}</div>
                 </div>
                 <div class="mini-metric">
                     <div class="mini-metric-label">Humidity</div>
-                    <div class="mini-metric-value">${humidity}</div>
+                    <div class="mini-metric-value">${escapeHtml(humidity)}</div>
                 </div>
                 <div class="mini-metric">
                     <div class="mini-metric-label">GPIO</div>
-                    <div class="mini-metric-value">${safeVal(sensor.gpio, "-")}</div>
+                    <div class="mini-metric-value">${escapeHtml(String(safeVal(sensor.gpio, "-")))}</div>
                 </div>
                 <div class="mini-metric">
                     <div class="mini-metric-label">Enabled</div>
@@ -294,14 +318,14 @@ function createDashboardSensorCard(sensor) {
         </div>
     `;
 
-    const toggle = card.querySelector(`[data-toggle-key]`);
+    const toggle = card.querySelector('input[type="checkbox"]');
     toggle.addEventListener("change", () => {
         expanded[sensorKey] = toggle.checked;
         localStorage.setItem("sensorExpanded", JSON.stringify(expanded));
         render();
     });
 
-    const nameInput = card.querySelector(`[data-rename-key]`);
+    const nameInput = card.querySelector(".sensor-name-input");
     nameInput.addEventListener("change", () => {
         customNames[sensorKey] = nameInput.value.trim() || sensor.name || sensorKey;
         localStorage.setItem("sensorNames", JSON.stringify(customNames));
@@ -326,15 +350,15 @@ function addClassicDHTCard(container, sensor) {
             <div class="sensor-grid">
                 <div class="metric">
                     <div class="metric-label">Temperature</div>
-                    <div class="metric-value">${temp}</div>
+                    <div class="metric-value">${escapeHtml(temp)}</div>
                 </div>
                 <div class="metric">
                     <div class="metric-label">Humidity</div>
-                    <div class="metric-value">${humidity}</div>
+                    <div class="metric-value">${escapeHtml(humidity)}</div>
                 </div>
                 <div class="metric">
                     <div class="metric-label">GPIO</div>
-                    <div class="metric-value">${safeVal(sensor.gpio, "-")}</div>
+                    <div class="metric-value">${escapeHtml(String(safeVal(sensor.gpio, "-")))}</div>
                 </div>
                 <div class="metric">
                     <div class="metric-label">Enabled</div>
