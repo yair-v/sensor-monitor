@@ -1,67 +1,81 @@
 const express = require("express");
 const http = require("http");
-const { Server } = require("socket.io");
 const cors = require("cors");
-const path = require("path");
+const { Server } = require("socket.io");
 
 const app = express();
-app.use(cors());
-app.use(express.json());
-
-// 🔥 מגיש את ה-frontend
-app.use(express.static(path.join(__dirname, "web")));
-
-app.get("*", (req, res) => {
-    res.sendFile(path.join(__dirname, "web", "index.html"));
-});
-
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: { origin: "*" }
 });
 
-const PORT = process.env.PORT || 3001;
+app.use(cors());
+app.use(express.json());
+app.use(express.static("web"));
 
-// מצב נוכחי
-let currentState = {
-    lastUpdate: null,
+/* =========================
+   🔥 GLOBAL STATE (BUFFER)
+========================= */
+
+let latestState = {
     device_id: null,
+    lastUpdate: null,
     data: {}
 };
 
-// חיבור דפדפן
-io.on("connection", (socket) => {
-    console.log("Client connected");
+/* =========================
+   📡 INGEST (מהרספברי)
+========================= */
 
-    socket.emit("initial_state", currentState);
+app.post("/api/ingest", (req, res) => {
+    try {
+        const payload = req.body;
+
+        latestState = {
+            device_id: payload.device_id,
+            lastUpdate: new Date().toISOString(),
+            data: payload
+        };
+
+        io.emit("update", latestState);
+
+        res.json({ status: "ok" });
+
+    } catch (err) {
+        console.error("INGEST ERROR:", err);
+        res.status(500).json({ error: "failed" });
+    }
+});
+
+/* =========================
+   📥 STATE FETCH (ל־UI)
+========================= */
+
+app.get("/api/status", (req, res) => {
+    res.json(latestState);
+});
+
+/* =========================
+   🔌 SOCKET
+========================= */
+
+io.on("connection", (socket) => {
+    console.log("client connected");
+
+    // 🔥 שולח את המצב האחרון מיד
+    socket.emit("initial_state", latestState);
 
     socket.on("disconnect", () => {
-        console.log("Client disconnected");
+        console.log("client disconnected");
     });
 });
 
-// קבלת נתונים מהרספברי
-app.post("/api/ingest", (req, res) => {
-    const payload = req.body;
+/* =========================
+   🚀 START
+========================= */
 
-    currentState = {
-        lastUpdate: new Date(),
-        device_id: payload.device_id,
-        data: payload
-    };
-
-    io.emit("update", currentState);
-
-    console.log("DATA:", payload.device_id);
-
-    res.json({ status: "ok" });
-});
-
-// heartbeat
-app.get("/api/status", (req, res) => {
-    res.json({ status: "alive" });
-});
+const PORT = process.env.PORT || 3001;
 
 server.listen(PORT, () => {
-    console.log("Server running on port " + PORT);
+    console.log("Server running on port", PORT);
 });
